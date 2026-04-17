@@ -1,98 +1,362 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Stockify Backend (NestJS + Prisma)
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Backend service for **Stockify**, an inventory management system.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+This API provides:
+- JWT authentication
+- Role-based access control (RBAC)
+- Category and product management
+- Inventory stock movement with transaction history
+- PostgreSQL persistence via Prisma
 
-## Description
+---
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+## Table of Contents
 
-## Project setup
+1. [Tech Stack](#tech-stack)
+2. [Project Architecture](#project-architecture)
+3. [Business Flow Overview](#business-flow-overview)
+4. [Authentication & Authorization](#authentication--authorization)
+5. [Database Model (Prisma)](#database-model-prisma)
+6. [Environment Variables](#environment-variables)
+7. [Run the Backend](#run-the-backend)
+8. [API Documentation (Swagger)](#api-documentation-swagger)
+9. [REST API Endpoints](#rest-api-endpoints)
+10. [Validation, Error Handling, and CORS](#validation-error-handling-and-cors)
+11. [Scripts](#scripts)
+12. [Known Notes](#known-notes)
 
-```bash
-$ pnpm install
+---
+
+## Tech Stack
+
+- **Framework:** NestJS (TypeScript)
+- **Database:** PostgreSQL
+- **ORM:** Prisma
+- **Auth:** JWT + Passport
+- **Validation:** class-validator + class-transformer
+- **Password hashing:** bcrypt
+- **Docs:** Swagger (`/api/docs`)
+- **Package manager:** pnpm
+
+---
+
+## Project Architecture
+
+Main modules in `src/`:
+
+- `auth/`  
+  Registration, login, JWT strategy, guards, and role checks.
+
+- `categories/`  
+  CRUD for product categories.
+
+- `products/`  
+  CRUD for products + filtering and pagination.
+
+- `inventory/`  
+  Stock operations (`IN`, `OUT`, `ADJUST`) and transaction history.
+
+- `prisma/`  
+  Prisma service/module for database access.
+
+Application bootstrap is in `src/main.ts`:
+- Global `ValidationPipe` (`whitelist`, `transform`)
+- CORS enabled for frontend origins
+- Swagger setup on `/api/docs`
+
+---
+
+## Business Flow Overview
+
+1. User registers and logs in.
+2. API returns `access_token` (JWT).
+3. Client sends `Authorization: Bearer <token>` for protected routes.
+4. Backend checks token validity (`JwtAuthGuard`).
+5. For admin-only routes, backend also checks role (`RolesGuard`).
+6. Product/category/stock operations are persisted to PostgreSQL.
+7. Inventory changes are tracked in `InventoryTransaction`.
+
+---
+
+## Authentication & Authorization
+
+### JWT
+
+- Login endpoint issues JWT containing:
+  - `sub` (user id)
+  - `email`
+  - `role`
+- JWT expiration is configured for **1 day**.
+
+### Roles
+
+Role enum (`prisma/schema.prisma`):
+- `ADMIN`
+- `MANAGER`
+- `WORKER`
+
+### Access Policy (current implementation)
+
+- `POST /categories` → **ADMIN only**
+- `POST /products` → **ADMIN only**
+- `PATCH /categories/:id`, `DELETE /categories/:id` → authenticated user
+- `PATCH /products/:id`, `DELETE /products/:id` → authenticated user
+- `GET` endpoints are public unless explicitly guarded
+
+> Note: If you want stricter policy (e.g. only `ADMIN` for update/delete too), extend `@Roles(...)` on those routes.
+
+---
+
+## Database Model (Prisma)
+
+Defined in `prisma/schema.prisma`.
+
+### Entities
+
+#### `User`
+- `id` (PK)
+- `email` (unique)
+- `password` (hashed)
+- `role` (`ADMIN | MANAGER | WORKER`)
+- `createdAt`
+
+#### `Category`
+- `id` (PK)
+- `name` (unique)
+- `description` (optional)
+- `createdAt`
+- relation: one-to-many with `Product`
+
+#### `Product`
+- `id` (PK)
+- `name`
+- `quantity` (default `0`)
+- `price`
+- `categoryId` (FK)
+- relation: many-to-one with `Category`
+- relation: one-to-many with `InventoryTransaction`
+
+#### `InventoryTransaction`
+- `id` (PK)
+- `amount`
+- `comment` (optional)
+- `type` (`IN | OUT | ADJUST`)
+- `productId` (FK)
+- `userId` (FK)
+- `createdAt`
+
+---
+
+## Environment Variables
+
+The project uses root `.env` values for local/docker workflow.
+
+Required keys:
+
+```env
+DB_USER=postgres
+DB_PASSWORD=your_password
+DB_NAME=stockify_db
+JWT_SECRET=your_jwt_secret
 ```
 
-## Compile and run the project
+Optional:
 
-```bash
-# development
-$ pnpm run start
-
-# watch mode
-$ pnpm run start:dev
-
-# production mode
-$ pnpm run start:prod
+```env
+PORT=3000
+FRONTEND_URL=http://localhost:5173
+DATABASE_URL=postgresql://user:password@host:5432/db?schema=public
 ```
 
-## Run tests
+If `DATABASE_URL` is not provided, Prisma config can derive it from `DB_USER`, `DB_PASSWORD`, and `DB_NAME` for local runs.
+
+---
+
+## Run the Backend
+
+### Option A: Local (without Docker)
 
 ```bash
-# unit tests
-$ pnpm run test
-
-# e2e tests
-$ pnpm run test:e2e
-
-# test coverage
-$ pnpm run test:cov
+pnpm install
+pnpm prisma generate
+pnpm prisma migrate dev
+pnpm run start:dev
 ```
 
-## Deployment
+Backend default URL: `http://localhost:3000`
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+### Option B: Docker Compose (recommended for full environment)
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+From project root (`/main`):
 
 ```bash
-$ pnpm install -g @nestjs/mau
-$ mau deploy
+docker compose up -d --build
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+This starts:
+- PostgreSQL container (`db`)
+- Backend container (`backend`)
 
-## Resources
+At startup, backend runs migrations (`prisma migrate deploy`) before launching app.
 
-Check out a few resources that may come in handy when working with NestJS:
+---
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+## API Documentation (Swagger)
 
-## Support
+Swagger UI is available at:
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+`http://localhost:3000/api/docs`
 
-## Stay in touch
+Use the **Authorize** button and paste:
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+```text
+Bearer <your_access_token>
+```
 
-## License
+---
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+## REST API Endpoints
+
+### Auth
+
+#### `POST /auth/register`
+Register new user.
+
+Request body:
+
+```json
+{
+  "email": "admin@example.com",
+  "password": "123456",
+  "role": "ADMIN"
+}
+```
+
+#### `POST /auth/login`
+Authenticate user and return JWT.
+
+Request body:
+
+```json
+{
+  "email": "admin@example.com",
+  "password": "123456"
+}
+```
+
+Response:
+
+```json
+{
+  "access_token": "...",
+  "user": {
+    "id": 1,
+    "email": "admin@example.com",
+    "role": "ADMIN"
+  }
+}
+```
+
+---
+
+### Categories
+
+- `POST /categories` (JWT + `ADMIN`)
+- `GET /categories` (public)
+- `GET /categories/:id` (public)
+- `PATCH /categories/:id` (JWT)
+- `DELETE /categories/:id` (JWT)
+
+---
+
+### Products
+
+- `POST /products` (JWT + `ADMIN`)
+- `GET /products` (public; supports `skip`, `take`, `categoryId`)
+- `GET /products/:id` (public)
+- `PATCH /products/:id` (JWT)
+- `DELETE /products/:id` (JWT)
+
+Example:
+
+`GET /products?skip=0&take=10&categoryId=1`
+
+---
+
+### Inventory
+
+- `POST /inventory/move` (JWT)
+- `GET /inventory/transactions` (public)
+
+`/inventory/move` body example:
+
+```json
+{
+  "productId": 1,
+  "amount": 10,
+  "type": "IN",
+  "comment": "Restock shipment"
+}
+```
+
+`type` rules:
+- `IN` → increase product quantity
+- `OUT` → decrease quantity (fails if not enough stock)
+- `ADJUST` → set exact quantity
+
+---
+
+## Validation, Error Handling, and CORS
+
+### Validation
+
+Global `ValidationPipe` is enabled with:
+- `whitelist: true` (unknown fields stripped)
+- `transform: true` (query/body values transformed to DTO types)
+
+### Common error responses
+
+- `400` validation/business errors
+- `401` missing/invalid JWT
+- `403` role denied by RBAC
+- `404` entity not found
+- `409` conflict (e.g. duplicate email/category)
+
+### CORS
+
+Allowed origins include:
+- `http://localhost:5173`
+- `http://127.0.0.1:5173`
+- optional `FRONTEND_URL` env value
+
+Credentials are enabled.
+
+---
+
+## Scripts
+
+Available in `backend/package.json`:
+
+```bash
+pnpm run start        # start app
+pnpm run start:dev    # start in watch mode
+pnpm run start:prod   # run compiled app
+pnpm run build        # compile TypeScript
+pnpm run lint         # eslint
+pnpm run test         # unit tests
+pnpm run test:e2e     # e2e tests
+pnpm run test:cov     # coverage
+```
+
+---
+
+## Known Notes
+
+- `POST /categories` and `POST /products` are intentionally admin-protected.
+- Frontend must send JWT in `Authorization` header for protected routes.
+- If tables are missing, ensure migrations were applied (`prisma migrate dev` locally or `migrate deploy` in Docker).
+
+---
+
+If you want, the next improvement can be a dedicated **API versioning section** (`/v1`) and a complete **OpenAPI request/response contract table** for every endpoint.
