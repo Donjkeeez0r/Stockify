@@ -1,0 +1,10 @@
+dist/
+test/
+node_modules/
+
+pnpm-lock.yaml
+.gitignore
+.prettierrc
+eslint.config.mjs
+README.md
+Dockerfile

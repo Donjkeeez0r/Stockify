@@ -1,0 +1,45 @@
+services:
+  # Сервис базы данных
+  db:
+    image: postgres:16-alpine
+    restart: always
+    environment:
+      POSTGRES_USER: ${DB_USER}
+      POSTGRES_PASSWORD: ${DB_PASSWORD}
+      POSTGRES_DB: ${DB_NAME}
+    ports:
+      - "5432:5432"
+    volumes:
+      # Это и есть Volume: данные базы сохранятся, даже если контейнер удалят
+      - postgres_data:/var/lib/postgresql/data
+
+  # Сервис нашего бэкенда
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "3000:3000"
+    environment:
+      # Важно: вместо localhost пишем имя сервиса базы — 'db'
+      DATABASE_URL: postgresql://${DB_USER}:${DB_PASSWORD}@db:5432/${DB_NAME}?schema=public
+      JWT_SECRET: ${JWT_SECRET}
+    depends_on:
+      - db
+    # Команда для запуска с автоматическим применением миграций
+    command: >
+      sh -c "npx prisma migrate deploy && node dist/src/main.js"
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: always
+    ports:
+      - "5173:5173"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
